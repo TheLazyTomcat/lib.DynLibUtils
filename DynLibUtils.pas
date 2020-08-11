@@ -14,7 +14,7 @@
     on diffrent systems.
     Beyond that, only some simple macro functions are currently implemented.
 
-  Version 1.0 (2020-08-11)
+  Version 1.0.1 (2020-08-11)
 
   Last change 2020-08-11
 
@@ -51,8 +51,16 @@ unit DynLibUtils;
 {$IFDEF FPC}
   {$MODE ObjFPC}
   {$MODESWITCH CLASSICPROCVARS+}
+  {$INLINE ON}
+  {$DEFINE CanInline}
   {$DEFINE FPC_DisableWarns}
   {$MACRO ON}
+{$ELSE}
+  {$IF CompilerVersion >= 17 then}  // Delphi 2005+
+    {$DEFINE CanInline}
+  {$ELSE}
+    {$UNDEF CanInline}
+  {$IFEND}
 {$ENDIF}
 {$H+}
 
@@ -202,6 +210,19 @@ const
     FileName:       '';
     LibraryHandle:  {$IFDEF Windows}0{$ELSE}nil{$ENDIF});
 
+type
+{
+  Used for symbol resolving.
+}
+  TDLUSymbol = record
+    Name:       String;
+    AddressVar: PPointer;
+  end;
+  PDLUSymbol = ^TDLUSymbol;
+
+Function Symbol(const Name: String; AddressVar: PPointer): TDLUSymbol; overload; {$IFDEF CanInline}inline;{$ENDIF}
+Function Symbol(AddressVar: PPointer; const Name: String): TDLUSymbol; overload; {$IFDEF CanInline}inline;{$ENDIF}
+
 //------------------------------------------------------------------------------
 {
   Following functions work mostly the same as their low-level counterparts,
@@ -256,14 +277,27 @@ Function GetAndCheckSymbolAddr(Context: TDLULibraryContext; const SymbolName: St
 
   Returns number of succesfully resolved symbols.  
 }
-Function ResolveSymbols(Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer; overload;
+Function ResolveSymbolNames(Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
+
+{
+  ResolveSymbol
+
+  Resolves symbol whose name is given in Name field of parameter Symbol and
+  stores the address to a variable pointed to by the field AddressVar in the
+  same paramter.
+
+  When FailOnUnresolved is se to true, then the function will raise an
+  EDLUSymbolError exception, otherwise the failure (false) or success (true)
+  is indicated in the result.
+}
+Function ResolveSymbol(Context: TDLULibraryContext; Symbol: TDLUSymbol; FailOnUnresolved: Boolean = False): Boolean;
 
 {
   ResolveSymbols
 
-  This function works the same as the first overload, but names of individual
-  symbols is taken from passed string list and resulting addresses are stored
-  at respective places in Objects property (typecasted to TObject).
+  This function works the same as the ResolveSymbolNames, but names of
+  individual symbols are taken from passed string list and resulting addresses
+  are stored at respective places in Objects property (typecasted to TObject).
 
   The paramter Symbols is not declared as TStrings because it does not properly
   implement Objects property.
@@ -271,20 +305,37 @@ Function ResolveSymbols(Context: TDLULibraryContext; const Names: array of Strin
 Function ResolveSymbols(Context: TDLULibraryContext; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer; overload;
 
 {
-  OpenLibraryAndResolveSymbols
+  ResolveSymbols
+
+  This overload utilizes function ResolveSymbol to resolve TDLUSymbol
+  structures, see there for details.
+
+  Other paramteres and result value behaves the same as in the first overload.
+}
+Function ResolveSymbols(Context: TDLULibraryContext; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
+
+{
+  OpenLibraryAndResolveSymbol(s/Names)
 
   Following functions are just an macro functions that calls OpenLibrary and
-  then ResolveSymbols.
+  then ResolveSymbol(s/Names).
 
-  For details on parameters, see description of ResolveSymbols functions.
+  For details on parameters, see description of ResolveSymbol(s/Names)
+  functions.
 
-  Return value is a return value of particular ResolveSymbols used in the
-  implementation.
+  Return value is a return value of particular ResolveSymbol(s/Names) used in
+  the implementation.
 }
-Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext;
+Function OpenLibraryAndResolveSymbolNames(const LibFileName: String; var Context: TDLULibraryContext;
   const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer; overload;
+
 Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext;
   Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer; overload;
+
+Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext;
+  Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
+
+//------------------------------------------------------------------------------
 
 implementation
 
@@ -682,6 +733,22 @@ end;
     High-level functions - public part
 -------------------------------------------------------------------------------}
 
+Function Symbol(const Name: String; AddressVar: PPointer): TDLUSymbol;
+begin
+Result.Name := Name;
+Result.AddressVar := AddressVar;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Function Symbol(AddressVar: PPointer; const Name: String): TDLUSymbol;
+begin
+Result.Name := Name;
+Result.AddressVar := AddressVar;
+end;
+
+//------------------------------------------------------------------------------
+
 Function CheckLibrary(Context: TDLULibraryContext): Boolean;
 begin
 HLF_Lock;
@@ -773,7 +840,24 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function ResolveSymbols(Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
+Function ResolveSymbol(Context: TDLULibraryContext; Symbol: TDLUSymbol; FailOnUnresolved: Boolean = False): Boolean;
+begin
+HLF_Lock;
+try
+  If FailOnUnresolved then
+    begin
+      Symbol.AddressVar^ := GetAndCheckSymbolAddr(Context.LibraryHandle,Symbol.Name);
+      Result := True; // if something would be wrong, the GetAndCheckSymbolAddr would raise an exception
+    end
+  else Result := GetSymbolAddr(Context.LibraryHandle,Symbol.Name,Symbol.AddressVar^);
+finally
+  HLF_Unlock;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function ResolveSymbolNames(Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
 var
   i:  Integer;
 begin
@@ -801,7 +885,7 @@ finally
 end;
 end;
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+//------------------------------------------------------------------------------
 
 Function ResolveSymbols(Context: TDLULibraryContext; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer;
 var
@@ -832,16 +916,51 @@ finally
 end;
 end;
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Function ResolveSymbols(Context: TDLULibraryContext; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer;
+var
+  i:  Integer;
+begin
+Result := 0;
+HLF_Lock;
+try
+  For i := Low(Symbols) to High(Symbols) do
+    If ResolveSymbol(Context,Symbols[i],FailOnUnresolved) then
+      Inc(Result);
+finally
+  HLF_Unlock;
+end;
+end;
+
 //------------------------------------------------------------------------------
 
-Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
+Function OpenLibraryAndResolveSymbolNames(const LibFileName: String; var Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
 begin
 Result := 0;
 HLF_Lock;
 try
   OpenLibrary(LibFileName,Context);
   try
-    Result := ResolveSymbols(Context,Names,Addresses,FailOnUnresolved);
+    Result := ResolveSymbolNames(Context,Names,Addresses,FailOnUnresolved);
+  except
+    CloseLibrary(Context);
+  end;
+finally
+  HLF_Unlock;
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer;
+begin
+Result := 0;
+HLF_Lock;
+try
+  OpenLibrary(LibFileName,Context);
+  try
+    Result := ResolveSymbols(Context,Symbols,FailOnUnresolved);
   except
     CloseLibrary(Context);
   end;
@@ -852,7 +971,7 @@ end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer;
+Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
 begin
 Result := 0;
 HLF_Lock;
