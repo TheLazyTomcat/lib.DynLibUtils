@@ -1,3 +1,43 @@
+{-------------------------------------------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+-------------------------------------------------------------------------------}
+{===============================================================================
+
+  Dynamic Library Utilities
+
+    Main aim of this small library is to encapsulate dynamic library loading
+    and symbol resolving (ie. obtaining addresses of functions and variables)
+    on diffrent systems.
+    Beyond that, only some simple macro functions are currently implemented.
+
+  Version 1.0 (2020-08-11)
+
+  Last change 2020-08-11
+
+  ©2020 František Milt
+
+  Contacts:
+    František Milt: frantisek.milt@gmail.com
+
+  Support:
+    If you find this code useful, please consider supporting its author(s) by
+    making a small donation using the following link(s):
+
+      https://www.paypal.me/FMilt
+
+  Changelog:
+    For detailed changelog and history please refer to this git repository:
+
+      github.com/TheLazyTomcat/Lib.DynLibUtils
+
+  Dependencies:
+    StrRect - github.com/TheLazyTomcat/Lib.StrRect
+
+===============================================================================}
 unit DynLibUtils;
 
 {$IF Defined(WINDOWS) or Defined(MSWINDOWS)}
@@ -16,7 +56,19 @@ unit DynLibUtils;
 {$ENDIF}
 {$H+}
 
-{$DEFINE DLU_SilenceCriticalErrors}
+{
+  DLU_SilenceCriticalErrors
+
+  On Windows system and depending on process error mode, if loading of library
+  fails, an error dialog can be shown. This can be very obtrusive and unwanted.
+  You can suppress this dialog by defining this symbol.
+
+  Note that this suppressing affects only functions in this library and is not
+  presistent. 
+
+  NOT defined by default.
+}
+{.$DEFINE DLU_SilenceCriticalErrors}
 
 interface
 
