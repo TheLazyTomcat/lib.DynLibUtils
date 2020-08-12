@@ -16,7 +16,7 @@
 
   Version 1.0.1 (2020-08-11)
 
-  Last change 2020-08-11
+  Last change 2020-08-12
 
   ©2020 František Milt
 
@@ -945,6 +945,7 @@ try
     Result := ResolveSymbolNames(Context,Names,Addresses,FailOnUnresolved);
   except
     CloseLibrary(Context);
+    raise;  // re-raise exception
   end;
 finally
   HLF_Unlock;
@@ -963,6 +964,7 @@ try
     Result := ResolveSymbols(Context,Symbols,FailOnUnresolved);
   except
     CloseLibrary(Context);
+    raise;
   end;
 finally
   HLF_Unlock;
@@ -981,6 +983,7 @@ try
     Result := ResolveSymbols(Context,Symbols,FailOnUnresolved);
   except
     CloseLibrary(Context);
+    raise;
   end;
 finally
   HLF_Unlock;
