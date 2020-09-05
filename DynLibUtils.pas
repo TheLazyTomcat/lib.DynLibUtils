@@ -72,7 +72,7 @@ unit DynLibUtils;
   You can suppress this dialog by defining this symbol.
 
   Note that this suppressing affects only functions in this library and is not
-  presistent. 
+  persistent. 
 
   NOT defined by default.
 }
