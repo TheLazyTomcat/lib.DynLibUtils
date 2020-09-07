@@ -11,12 +11,12 @@
 
     Main aim of this small library is to encapsulate dynamic library loading
     and symbol resolving (ie. obtaining addresses of functions and variables)
-    on diffrent systems.
+    on different systems.
     Beyond that, only some simple macro functions are currently implemented.
 
   Version 1.0.1 (2020-08-11)
 
-  Last change 2020-08-12
+  Last change 2020-09-07
 
   ©2020 František Milt
 
@@ -68,8 +68,8 @@ unit DynLibUtils;
   DLU_SilenceCriticalErrors
 
   On Windows system and depending on process error mode, if loading of library
-  fails, an error dialog can be shown. This can be very obtrusive and unwanted.
-  You can suppress this dialog by defining this symbol.
+  fails, an error dialog can be shown. This may be very obtrusive and unwanted.
+  You can suppress the dialog by defining this symbol.
 
   Note that this suppressing affects only functions in this library and is not
   persistent. 
@@ -134,8 +134,8 @@ Function CheckLibrary(LibHandle: TDLULibraryHandle): Boolean; overload;
   Windows OS - when the library cannot be loaded for whatever reason, the
                function will initiate critical system error, which will display
                an error dialog. If this behavior is undesirable, define symbol
-               DLU_SilentCriticalErrors (either project-wide or in this unit,
-               see higher).
+               DLU_SilentCriticalErrors (either project-wide or in this unit),
+               for details see higher.
 }
 Function OpenLibrary(const LibFileName: String): TDLULibraryHandle; overload;
 
@@ -145,9 +145,9 @@ Function OpenLibrary(const LibFileName: String): TDLULibraryHandle; overload;
   Closes and potentially unloads the library (unloading is managed by OS).
 
   It checks the handle (function CheckLibrary) before processing, if it is not
-  deem to be valid, it will exit without doing anything.
+  deemed to be valid, it will exit without doing anything.
 
-  Note that it vill invalide the library handle, irrespective of whether the OS
+  Note that it will invalide the library handle, irrespective of whether the OS
   unloads the library or not.
 }
 procedure CloseLibrary(var LibHandle: TDLULibraryHandle); overload;
@@ -194,7 +194,8 @@ Function GetAndCheckSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: S
 ===============================================================================}
 {
   Variables of type TDLULibraryContext must be explicitly initialized before
-  first. Either zero the memory or assign the DefaultLibraryContext constant.
+  first use. Either zero the memory or assign the DefaultLibraryContext
+  constant.
 }
 type
   TDLULibraryContext = record
@@ -239,12 +240,13 @@ Function CheckLibrary(Context: TDLULibraryContext): Boolean; overload;
   If OpenLibrary fails to load the requested library, it will raise an
   EDLULibraryOpenError exception.
 
-  Returns reference count of the given context.
+  Returns reference count of the given context upon return from the function.
 }
 Function OpenLibrary(const LibFileName: String; var Context: TDLULibraryContext): Integer; overload;
+
 {
   CloseLibrary returns true when the reference count reaches zero and the
-  library is freen using system calls, false otherwise.
+  library is freed using system calls, false otherwise.
 }
 Function CloseLibrary(var Context: TDLULibraryContext): Boolean; overload;
 
@@ -261,11 +263,11 @@ Function GetAndCheckSymbolAddr(Context: TDLULibraryContext; const SymbolName: St
   stored at second position).
 
   If FailOnUnresolved is set to false, the function will try to resolve
-  everything. That some names were not resoved is evidenced by return value
+  everything. That some names were not resoved is evidenced by returned value
   being lower than length of Names array.
 
   WARNING - it is not possible to discern which symbols were not resolved, as
-            any symbol can be correctly resolved to nil. You have to test each
+            any symbol can be CORRECTLY resolved to nil. You have to test each
             symbol separately for example in calls to overload of GetSymbolAddr
             that indicates failure/success.
 
@@ -287,8 +289,8 @@ Function ResolveSymbolNames(Context: TDLULibraryContext; const Names: array of S
   same paramter.
 
   When FailOnUnresolved is se to true, then the function will raise an
-  EDLUSymbolError exception, otherwise the failure (false) or success (true)
-  is indicated in the result.
+  EDLUSymbolError exception when the symbol cannot be resolved, otherwise the
+  failure (false) or success (true) is indicated in the result.
 }
 Function ResolveSymbol(Context: TDLULibraryContext; Symbol: TDLUSymbol; FailOnUnresolved: Boolean = False): Boolean;
 
@@ -299,8 +301,8 @@ Function ResolveSymbol(Context: TDLULibraryContext; Symbol: TDLUSymbol; FailOnUn
   individual symbols are taken from passed string list and resulting addresses
   are stored at respective places in Objects property (typecasted to TObject).
 
-  The paramter Symbols is not declared as TStrings because it does not properly
-  implement Objects property.
+  The paramter Symbols is not declared as TStrings because that class does not
+  properly implement Objects property.
 }
 Function ResolveSymbols(Context: TDLULibraryContext; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer; overload;
 
@@ -310,7 +312,7 @@ Function ResolveSymbols(Context: TDLULibraryContext; Symbols: TStringList; FailO
   This overload utilizes function ResolveSymbol to resolve TDLUSymbol
   structures, see there for details.
 
-  Other paramteres and result value behaves the same as in the first overload.
+  Other parameters and result value behaves the same as in the first overload.
 }
 Function ResolveSymbols(Context: TDLULibraryContext; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
 
@@ -530,8 +532,8 @@ If IsWindows7OrGreater then
   begin
     {
       kernel32.dll really should be loaded by this point, so there should be no
-      need to call LoadLibrary (which might cause trouble because a need to call
-      FreeLibrary and so on)
+      need to call LoadLibrary (which might cause trouble because of a need to
+      call FreeLibrary and so on)
     }
     Module := GetModuleHandle('kernel32.dll');
     If Module <> 0 then
