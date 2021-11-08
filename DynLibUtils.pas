@@ -80,7 +80,7 @@ uses
 type
   EDLUException = class(Exception);
 
-  EDLULibraryOpenError = class(EDLUException);  
+  EDLULibraryOpenError = class(EDLUException);
   EDLUInvalidParameter = class(EDLUException);
   EDLUSymbolError      = class(EDLUException);
 
@@ -209,10 +209,29 @@ Function GetSymbolAddr(LibraryHandle: TDLULibraryHandle; const SymbolName: Strin
 }
 Function GetAndCheckSymbolAddr(LibraryHandle: TDLULibraryHandle; const SymbolName: String): Pointer;
 
-{$message 'implement'}
-//Function LibraryIsPresent(const LibFileName: String): Boolean;
+{
+  LibraryIsPresent
 
-//Function SymbolIsPresent(const LibFileName, SymbolName: String): Boolean;
+  Tries to load the requested library. If it succeeded, it returns true,
+  otherwise it will return false.
+
+    NOTE - critical error dialog is suppressed.
+}
+Function LibraryIsPresent(const LibFileName: String): Boolean;
+
+{
+  SymbolIsPresent
+
+  Returns true when requested symbol can be obtained from given library, false
+  otherwise.
+
+  If will first load the library, then it will try to normally resolve the
+  symbol and in the end will unload the library.
+
+  If the library cannot be loaded, it will raise an EDLULibraryOpenError
+  exception.
+}
+Function SymbolIsPresent(const LibFileName, SymbolName: String): Boolean;
 
 {-------------------------------------------------------------------------------
     Functions - macro functions
@@ -582,6 +601,35 @@ If CheckLibrary(LibraryHandle) then
 {$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
 else raise EDLUInvalidParameter.CreateFmt('GetAndCheckSymbolAddr: Invalid library handle (0x%p).',[Pointer(LibraryHandle)]);
 {$IFDEF FPCDWM}{$POP}{$ENDIF}
+end;
+
+//------------------------------------------------------------------------------
+
+Function LibraryIsPresent(const LibFileName: String): Boolean;
+var
+  LibraryHandle:  TDLULibraryHandle;
+begin
+LibraryHandle := OpenLibrary(LibFileName,True);
+try
+  Result := CheckLibrary(LibraryHandle);
+finally
+  CloseLibrary(LibraryHandle);  // if the handle is not valid, this won't do anything
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function SymbolIsPresent(const LibFileName, SymbolName: String): Boolean;
+var
+  LibraryHandle:  TDLULibraryHandle;
+  SymbolAddress:  Pointer;
+begin
+LibraryHandle := OpenAndCheckLibrary(LibFileName,True);
+try
+  Result := GetSymbolAddr(LibraryHandle,SymbolName,SymbolAddress);
+finally
+  CloseLibrary(LibraryHandle);
+end;
 end;
 
 {-------------------------------------------------------------------------------
