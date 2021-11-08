@@ -14,11 +14,11 @@
     on different systems.
     Beyond that, only some simple macro functions are currently implemented.
 
-  Version 1.0.1 (2020-08-11)
+  Version 1.1 (2021-11-08)
 
-  Last change 2020-09-07
+  Last change 2021-11-08
 
-  ©2020 František Milt
+  ©2020-2021 František Milt
 
   Contacts:
     František Milt: frantisek.milt@gmail.com
@@ -35,7 +35,12 @@
       github.com/TheLazyTomcat/Lib.DynLibUtils
 
   Dependencies:
-    StrRect - github.com/TheLazyTomcat/Lib.StrRect
+    StrRect        - github.com/TheLazyTomcat/Lib.StrRect
+  * AuxTypes       - github.com/TheLazyTomcat/Lib.AuxTypes
+  * WindowsVersion - github.com/TheLazyTomcat/Lib.WindowsVersion
+
+  Libraries AuxTypes and WindowsVersion are only required when compiling for
+  Windows OS.
 
 ===============================================================================}
 unit DynLibUtils;
@@ -64,80 +69,95 @@ unit DynLibUtils;
 {$ENDIF}
 {$H+}
 
-{
-  DLU_SilenceCriticalErrors
-
-  On Windows system and depending on process error mode, if loading of library
-  fails, an error dialog can be shown. This may be very obtrusive and unwanted.
-  You can suppress the dialog by defining this symbol.
-
-  Note that this suppressing affects only functions in this library and is not
-  persistent. 
-
-  NOT defined by default.
-}
-{.$DEFINE DLU_SilenceCriticalErrors}
-
 interface
 
 uses
   {$IFDEF Windows}Windows,{$ENDIF} SysUtils, Classes;
 
+{===============================================================================
+    Library-specific exceptions
+===============================================================================}
 type
   EDLUException = class(Exception);
 
-  EDLUSymbolError      = class(EDLUException);
+  EDLULibraryOpenError = class(EDLUException);  
   EDLUInvalidParameter = class(EDLUException);
-  EDLULibraryOpenError = class(EDLUException);
+  EDLUSymbolError      = class(EDLUException);
 
-{$IFDEF Windows}      
+{$IFDEF Windows}
 {===============================================================================
-    Process error mode management functions - declaration
+    Process error mode management - declaration
 ===============================================================================}
-{
-  For details, see implementation.
-}
 
-var
-  GetThreadErrorMode: Function: DWORD; stdcall;
-  SetThreadErrorMode: Function(dwNewMode: DWORD; lpOldMode: LPDWORD): BOOL; stdcall;
-  
+Function GetThreadErrorMode: DWORD;
+Function SetThreadErrorMode(dwNewMode: DWORD; lpOldMode: LPDWORD): BOOL;
+
 {$ENDIF}
 
 {===============================================================================
-    Low-level functions - declaration
+    Common types, constants, variables
 ===============================================================================}
-{
-  Low-level functions are more-or-less just a wrappers for system calls.
-  They are here to hide differences between operating systems.
-}
-
 type
   TDLULibraryHandle = {$IFDEF Windows}THandle{$ELSE}Pointer{$ENDIF};
   PDLULibraryHandle = ^TDLULibraryHandle;
 
-//------------------------------------------------------------------------------
+  // TDLUSymbol is used in macro functions for symbol resolving
+  TDLUSymbol = record
+    Name:       String;
+    AddressVar: PPointer;
+  end;
+  PDLUSymbol = ^TDLUSymbol;
 
+{===============================================================================
+    Functions - declaration
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Functions - utility functions
+-------------------------------------------------------------------------------}
+
+// inline contructors for TDLUSymbol record
+Function Symbol(const Name: String; AddressVar: PPointer): TDLUSymbol; overload; {$IFDEF CanInline}inline;{$ENDIF}
+Function Symbol(AddressVar: PPointer; const Name: String): TDLUSymbol; overload; {$IFDEF CanInline}inline;{$ENDIF}
+
+{-------------------------------------------------------------------------------
+    Functions - core functions
+-------------------------------------------------------------------------------}
 {
   CheckLibrary
 
   Returns true when passed parameter is initialized (is not null/nil), ie. it
   contains handle to a library, false otherwise.
 }
-Function CheckLibrary(LibHandle: TDLULibraryHandle): Boolean; overload;
+Function CheckLibrary(LibraryHandle: TDLULibraryHandle): Boolean;
 
 {
   OpenLibrary
 
   Loads the requested library. It will return null/nil if it cannot be loaded.
 
-  Windows OS - when the library cannot be loaded for whatever reason, the
-               function will initiate critical system error, which will display
-               an error dialog. If this behavior is undesirable, define symbol
-               DLU_SilentCriticalErrors (either project-wide or in this unit),
-               for details see higher.
+  In Windows OS, when the library cannot be loaded for whatever reason, the
+  called WinAPI function will initiate critical system error, which will
+  display an error dialog (a window).
+  This might be very obtrusive (eg. when probing DLL existence) - so if this
+  behavior is undesirable, set SilentCriticalErrors parameter to true and this
+  error dialog will be suppressed.
+
+    NOTE - parameter SilentCriticalErrors has no effect in operating systems
+           other than windows.
+
+    WARNING - suppressing error dialog is inherently thread unsafe in systems
+              older than Windows 7.
 }
-Function OpenLibrary(const LibFileName: String): TDLULibraryHandle; overload;
+Function OpenLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle; overload;
+
+{
+  OpenLibraryAndCheck
+
+  Works the same as OpenLibrary (in fact it is calling it), but when the
+  library cannot be loaded (null/nil handle returned) it will raise an
+  EDLULibraryOpenError exception.
+}
+Function OpenAndCheckLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle;
 
 {
   CloseLibrary
@@ -150,7 +170,7 @@ Function OpenLibrary(const LibFileName: String): TDLULibraryHandle; overload;
   Note that it will invalide the library handle, irrespective of whether the OS
   unloads the library or not.
 }
-procedure CloseLibrary(var LibHandle: TDLULibraryHandle); overload;
+procedure CloseLibrary(var LibraryHandle: TDLULibraryHandle); overload;
 
 {
   GetSymbolAddr
@@ -160,7 +180,7 @@ procedure CloseLibrary(var LibHandle: TDLULibraryHandle); overload;
   If the library handle is not valid, it will raise an EDLUInvalidParameter
   exception.
 }
-Function GetSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: String): Pointer; overload;
+Function GetSymbolAddr(LibraryHandle: TDLULibraryHandle; const SymbolName: String): Pointer; overload;
 
 {
   GetSymbolAddr
@@ -173,7 +193,7 @@ Function GetSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: String): 
   If the library handle is not valid, it will raise an EDLUInvalidParameter
   exception.
 }
-Function GetSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: String; out Address: Pointer): Boolean; overload;
+Function GetSymbolAddr(LibraryHandle: TDLULibraryHandle; const SymbolName: String; out Address: Pointer): Boolean; overload;
 
 {
   GetAndCheckSymbolAddr
@@ -187,75 +207,18 @@ Function GetSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: String; o
   If the library handle is not valid, it will raise an EDLUInvalidParameter
   exception.
 }
-Function GetAndCheckSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: String): Pointer; overload;
+Function GetAndCheckSymbolAddr(LibraryHandle: TDLULibraryHandle; const SymbolName: String): Pointer;
 
-{===============================================================================
-    High-level functions - declaration
-===============================================================================}
+{$message 'implement'}
+//Function LibraryIsPresent(const LibFileName: String): Boolean;
+
+//Function SymbolIsPresent(const LibFileName, SymbolName: String): Boolean;
+
+{-------------------------------------------------------------------------------
+    Functions - macro functions
+-------------------------------------------------------------------------------}
 {
-  Variables of type TDLULibraryContext must be explicitly initialized before
-  first use. Either zero the memory or assign the DefaultLibraryContext
-  constant.
-}
-type
-  TDLULibraryContext = record
-    ReferenceCount: Integer;
-    FileName:       String; // original file name (possibly with a path) passed to OpenLibrary
-    LibraryHandle:  TDLULibraryHandle;
-  end;
-  PDLULibraryContext = ^TDLULibraryContext;
-
-const
-  DefaultLibraryContext: TDLULibraryContext = (
-    ReferenceCount: 0;
-    FileName:       '';
-    LibraryHandle:  {$IFDEF Windows}0{$ELSE}nil{$ENDIF});
-
-type
-{
-  Used for symbol resolving.
-}
-  TDLUSymbol = record
-    Name:       String;
-    AddressVar: PPointer;
-  end;
-  PDLUSymbol = ^TDLUSymbol;
-
-Function Symbol(const Name: String; AddressVar: PPointer): TDLUSymbol; overload; {$IFDEF CanInline}inline;{$ENDIF}
-Function Symbol(AddressVar: PPointer; const Name: String): TDLUSymbol; overload; {$IFDEF CanInline}inline;{$ENDIF}
-
-//------------------------------------------------------------------------------
-{
-  Following functions work mostly the same as their low-level counterparts,
-  see their description for details.
-
-  All High level functions are synchronized using one critical section, meaning
-  only one of them can be executed at a time in the entire module.
-  This is to ensure consistency of contexts, please be aware of that.  
-}
-
-Function CheckLibrary(Context: TDLULibraryContext): Boolean; overload;
-
-{
-  If OpenLibrary fails to load the requested library, it will raise an
-  EDLULibraryOpenError exception.
-
-  Returns reference count of the given context upon return from the function.
-}
-Function OpenLibrary(const LibFileName: String; var Context: TDLULibraryContext): Integer; overload;
-
-{
-  CloseLibrary returns true when the reference count reaches zero and the
-  library is freed using system calls, false otherwise.
-}
-Function CloseLibrary(var Context: TDLULibraryContext): Boolean; overload;
-
-Function GetSymbolAddr(Context: TDLULibraryContext; const SymbolName: String): Pointer; overload;
-Function GetSymbolAddr(Context: TDLULibraryContext; const SymbolName: String; out Address: Pointer): Boolean; overload;
-Function GetAndCheckSymbolAddr(Context: TDLULibraryContext; const SymbolName: String): Pointer; overload;
-
-{
-  ResolveSymbols
+  ResolveSymbolNames
 
   Resolves given symbols and stores obtained pointers to variables pointed by
   the items in Addresses array. For each symbol name, the resolved address is
@@ -271,7 +234,7 @@ Function GetAndCheckSymbolAddr(Context: TDLULibraryContext; const SymbolName: St
             symbol separately for example in calls to overload of GetSymbolAddr
             that indicates failure/success.
 
-  If FailOnUnresolved is set to true, the function will raise an EDLUSystemError
+  If FailOnUnresolved is set to true, the function will raise an EDLUSymbolError
   exception on first unresolved symbol.
 
   Length of both Names and Addresses arrays must be the same, otherwise an
@@ -279,20 +242,20 @@ Function GetAndCheckSymbolAddr(Context: TDLULibraryContext; const SymbolName: St
 
   Returns number of succesfully resolved symbols.  
 }
-Function ResolveSymbolNames(Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
+Function ResolveSymbolNames(LibraryHandle: TDLULibraryHandle; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
 
 {
   ResolveSymbol
 
   Resolves symbol whose name is given in Name field of parameter Symbol and
   stores the address to a variable pointed to by the field AddressVar in the
-  same paramter.
+  same parameter.
 
   When FailOnUnresolved is se to true, then the function will raise an
   EDLUSymbolError exception when the symbol cannot be resolved, otherwise the
   failure (false) or success (true) is indicated in the result.
 }
-Function ResolveSymbol(Context: TDLULibraryContext; Symbol: TDLUSymbol; FailOnUnresolved: Boolean = False): Boolean;
+Function ResolveSymbol(LibraryHandle: TDLULibraryHandle; Symbol: TDLUSymbol; FailOnUnresolved: Boolean = False): Boolean;
 
 {
   ResolveSymbols
@@ -301,222 +264,128 @@ Function ResolveSymbol(Context: TDLULibraryContext; Symbol: TDLUSymbol; FailOnUn
   individual symbols are taken from passed string list and resulting addresses
   are stored at respective places in Objects property (typecasted to TObject).
 
-  The paramter Symbols is not declared as TStrings because that class does not
-  properly implement Objects property.
+  The parameter Symbols is not declared as TStrings because that class does not
+  fully implement Objects property.
 }
-Function ResolveSymbols(Context: TDLULibraryContext; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer; overload;
+Function ResolveSymbols(LibraryHandle: TDLULibraryHandle; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer; overload;
 
 {
   ResolveSymbols
 
-  This overload utilizes function ResolveSymbol to resolve TDLUSymbol
-  structures, see there for details.
+  This overload is only repeatedly calling function ResolveSymbol to resolve
+  individual TDLUSymbol structures in the passed array, see description of
+  ResolveSymbol for details on its behavior.
 
-  Other parameters and result value behaves the same as in the first overload.
+  Other parameters and result value behaves the same as in the first overload
+  of ResolveSymbols.
 }
-Function ResolveSymbols(Context: TDLULibraryContext; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
+Function ResolveSymbols(LibraryHandle: TDLULibraryHandle; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
 
 {
   OpenLibraryAndResolveSymbol(s/Names)
 
-  Following functions are just an macro functions that calls OpenLibrary and
-  then ResolveSymbol(s/Names).
+  Following functions are just an macro functions that are calling
+  OpenAndCheckLibrary and then ResolveSymbol(s/Names). Refer to description of
+  those functions for their behavior (raised exceptions, meaning of parameters,
+  ...). 
 
-  For details on parameters, see description of ResolveSymbol(s/Names)
-  functions.
+  Returns a return value of particular ResolveSymbol(s/Names) used in the
+  implementation of given function.
 
-  Return value is a return value of particular ResolveSymbol(s/Names) used in
-  the implementation.
+  If an exception is raised, then content of the output parameter LibraryHandle
+  is undefined (when the exception is raised after the library was successfully
+  opened, it gets closed)
 }
-Function OpenLibraryAndResolveSymbolNames(const LibFileName: String; var Context: TDLULibraryContext;
-  const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer; overload;
+Function OpenLibraryAndResolveSymbolNames(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer;
 
-Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext;
-  Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer; overload;
+Function OpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  Symbols: TStringList; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer; overload;
 
-Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext;
-  Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
+Function OpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer; overload;
+
+{-------------------------------------------------------------------------------
+    Functions - backward compatibility
+-------------------------------------------------------------------------------}
+{
+  In version 1.1 of this library, the contexts were completely removed as they
+  offered little to no benefit over simple handles.
+
+  Following types, constants and functions are here to preserve at least some
+  backward compatibility with existing code that was using contexts.
+}
+type
+  TDLULibraryContext = TDLULibraryHandle;
+
+const
+  DefaultLibraryContext: TDLULibraryHandle = {$IFDEF Windows}0{$ELSE}nil{$ENDIF};
 
 //------------------------------------------------------------------------------
+{
+  Only a simple wrapper for OpenAndCheckLibrary, refer to that function for
+  full description.
+
+  Always returns 1.
+}
+Function OpenLibrary(const LibFileName: String; out Context: TDLULibraryContext; SilentCriticalErrors: Boolean = False): Integer; overload;
 
 implementation
 
 uses
   {$IFNDEF Windows}dl,{$ENDIF}
-  StrRect;
+  StrRect{$IFDEF Windows}, WindowsVersion{$ENDIF};
 
 {$IFDEF FPC_DisableWarns}
   {$DEFINE FPCDWM}
   {$DEFINE W4055:={$WARN 4055 OFF}} // Conversion between ordinals and pointers is not portable
+  {$DEFINE W5024:={$WARN 5024 OFF}} // Parameter "$1" not used
 {$ENDIF}
 
 {$IFDEF Windows}
 {===============================================================================
-    Process error mode management functions - implementation
+    Process error mode management - implementation
 ===============================================================================}
 {-------------------------------------------------------------------------------
-    Checking of Windows version
--------------------------------------------------------------------------------}
-
-const
-  VER_MINORVERSION     = $0000001;
-  VER_MAJORVERSION     = $0000002;
-  VER_SERVICEPACKMAJOR = $0000020;
-
-  VER_GREATER_EQUAL = 3;
-
-//------------------------------------------------------------------------------
-
-type
-  TOSVersionInfoExA = record
-    dwOSVersionInfoSize:  DWORD;
-    dwMajorVersion:       DWORD;
-    dwMinorVersion:       DWORD;
-    dwBuildNumber:        DWORD;
-    dwPlatformId:         DWORD;
-    szCSDVersion:         array[0..127] of AnsiChar;
-    wServicePackMajor:    Word;
-    wServicePackMinor:    Word;
-    wSuiteMask:           Word;
-    wProductType:         Byte;
-    wReserved:            Byte;
-  end;
-  POSVersionInfoExA = ^TOSVersionInfoExA;
-
-  TOSVersionInfoExW = record
-    dwOSVersionInfoSize:  DWORD;
-    dwMajorVersion:       DWORD;
-    dwMinorVersion:       DWORD;
-    dwBuildNumber:        DWORD;
-    dwPlatformId:         DWORD;
-    szCSDVersion:         array[0..127] of WideChar;
-    wServicePackMajor:    Word;
-    wServicePackMinor:    Word;
-    wSuiteMask:           Word;
-    wProductType:         Byte;
-    wReserved:            Byte;
-  end;
-  POSVersionInfoExW = ^TOSVersionInfoExW;
-
-{$IFDEF Unicode}
-  TOSVersionInfoEx = TOSVersionInfoExW;
-{$ELSE}
-  TOSVersionInfoEx = TOSVersionInfoExA;
-{$ENDIF}
-  POSVersionInfoEx = ^TOSVersionInfoEx;
-
-//------------------------------------------------------------------------------
-
-// external functions
-Function VerifyVersionInfoW(lpVersionInfo: POSVersionInfoExW; dwTypeMask: DWORD; dwlConditionMask: Int64): BOOL; stdcall; external kernel32;
-Function VerifyVersionInfoA(lpVersionInfo: POSVersionInfoExA; dwTypeMask: DWORD; dwlConditionMask: Int64): BOOL; stdcall; external kernel32;
-Function VerifyVersionInfo(lpVersionInfo: POSVersionInfoEx; dwTypeMask: DWORD; dwlConditionMask: Int64): BOOL; stdcall; external kernel32 name{$IFDEF Unicode}'VerifyVersionInfoW'{$ELSE}'VerifyVersionInfoA'{$ENDIF};
-
-Function VerSetConditionMask(ConditionMask: Int64; TypeMask: DWORD; Condition: Byte): Int64; stdcall; external kernel32;
-
-//------------------------------------------------------------------------------
-
-Function IsWindowsVersionOrGreater(wMajorVersion,wMinorVersion,wServicePackMajor: Word): Boolean;
-var
-  OSVersion:      TOSVersionInfoEx;
-  ConditionMask:  Int64;
-begin
-FillChar(Addr(OSVersion)^,SizeOf(TOSVersionInfoEx),0);
-OSVersion.dwOSVersionInfoSize := SizeOf(TOSVersionInfoEx);
-ConditionMask := VerSetConditionMask(
-  VerSetConditionMask(
-    VerSetConditionMask(0,VER_MAJORVERSION,VER_GREATER_EQUAL),
-    VER_MINORVERSION,VER_GREATER_EQUAL),
-  VER_SERVICEPACKMAJOR,VER_GREATER_EQUAL);
-OSVersion.dwMajorVersion := wMajorVersion;
-OSVersion.dwMinorVersion := wMinorVersion;
-OSVersion.wServicePackMajor := wServicePackMajor;
-Result := VerifyVersionInfo(@OSVersion,VER_MAJORVERSION or VER_MINORVERSION or VER_SERVICEPACKMAJOR,ConditionMask);
-end;
-
-//------------------------------------------------------------------------------
-
-Function IsWindows7OrGreater: Boolean;
-begin
-Result := IsWindowsVersionOrGreater(6,1,0);
-end;
-
-{-------------------------------------------------------------------------------
-    Error mode management
+    Process error mode management - internals
 -------------------------------------------------------------------------------}
 {
   "Solution" for thread safe error mode management (function GetThreadErrorMode
-  and SetThreadErrorMode) in old systems (Vista and older).
-  Note that this solution is NOT in itself completely thread safe (see further),
-  it is here just to provide compatibility with older systems while allowing
-  the use of newer system features.
+  and SetThreadErrorMode) in old systems (Windows Vista and older).
+  Note that this solution is NOT in itself thread safe, it is here just to
+  provide compatibility with older systems while allowing the use of newer
+  system features.
 
   In Windows 7 and newer, the system functions GetThreadErrorMode and
   SetThreadErrorMode are used as usual.
 
-  In older systems, wrappers with the same name as modern functions are used.
-  These wrapers are calling SetErrorMode WinAPI function.
-  Each of these wrappers is thread safe in the sense that only one of them can
-  execute at a time. They are all protected by one critical section.
-
-  Also, function OpenLibrary is protected by the same crit. section when symbol
-  DLU_SilenceCriticalErrors is defined.
-
-  Sadly, this protection mechanism will inevitably fail if SetErrorMode is
-  called directly anywhere else. This can be circumvented by hooking the
-  function, but lets not go down this rabbit hole.
+  In older systems, functions that tries to emulate the functionality through
+  use of SetErrorMode WinAPI function are called instead.
 }
 
-// synchronization for threaded functions
+Function EMUL_GetThreadErrorMode: DWORD; stdcall;
+begin
+// note that GetErrorMode is available only from Windows Vista
+Result := SetErrorMode(0);
+SetErrorMode(Result);
+end;
+
+//------------------------------------------------------------------------------
+
+Function EMUL_SetThreadErrorMode(dwNewMode: DWORD; lpOldMode: LPDWORD): BOOL; stdcall;
+begin
+If Assigned(lpOldMode) then
+  lpOldMode^ := SetErrorMode(dwNewMode)
+else
+  SetErrorMode(dwNewMode);
+Result := True;
+end;
+
+//------------------------------------------------------------------------------
+
 var
-  PEM_Synchronizer: TRTLCriticalSection;
-  PEM_NeedSync:     Boolean = True;
-
-//------------------------------------------------------------------------------
-
-procedure PEM_Lock;
-begin
-If PEM_NeedSync then
-  EnterCriticalSection(PEM_Synchronizer);
-end;
-
-//------------------------------------------------------------------------------
-
-procedure PEM_Unlock;
-begin
-If PEM_NeedSync then
-  LeaveCriticalSection(PEM_Synchronizer);
-end;
-
-//------------------------------------------------------------------------------
-
-Function PEM_GetThreadErrorMode: DWORD; stdcall;
-begin
-PEM_Lock;
-try
-  // note that GetErrorMode is available only from Windows Vista
-  Result := SetErrorMode(0);
-  SetErrorMode(Result);
-finally
-  PEM_Unlock;
-end;
-end;
-
-//------------------------------------------------------------------------------
-
-Function PEM_SetThreadErrorMode(dwNewMode: DWORD; lpOldMode: LPDWORD): BOOL; stdcall;
-begin
-PEM_Lock;
-try
-  If Assigned(lpOldMode) then
-    lpOldMode^ := SetErrorMode(dwNewMode)
-  else
-    SetErrorMode(dwNewMode);
-  Result := True;
-finally
-  PEM_Unlock;
-end;
-end;
+  VAR_GetThreadErrorMode: Function: DWORD; stdcall = EMUL_GetThreadErrorMode;
+  VAR_SetThreadErrorMode: Function(dwNewMode: DWORD; lpOldMode: LPDWORD): BOOL; stdcall = EMUL_SetThreadErrorMode;
 
 //------------------------------------------------------------------------------
 
@@ -524,9 +393,6 @@ procedure PEM_Initialize;
 var
   Module: TDLULibraryHandle;
 begin
-// by default call wrappers
-GetThreadErrorMode := PEM_GetThreadErrorMode;
-SetThreadErrorMode := PEM_SetThreadErrorMode;
 // for win7 and up, load "real" functions into procedural variables
 If IsWindows7OrGreater then
   begin
@@ -538,201 +404,36 @@ If IsWindows7OrGreater then
     Module := GetModuleHandle('kernel32.dll');
     If Module <> 0 then
       begin
-        @GetThreadErrorMode := GetProcAddress(Module,'GetThreadErrorMode');
-        @SetThreadErrorMode := GetProcAddress(Module,'SetThreadErrorMode');
-        PEM_NeedSync := False;
+        @VAR_GetThreadErrorMode := GetAndCheckSymbolAddr(Module,'GetThreadErrorMode');
+        @VAR_SetThreadErrorMode := GetAndCheckSymbolAddr(Module,'SetThreadErrorMode');
       end
-    else raise EDLUException.Create('Kernel32.dll not loaded.');
-  end;
-If PEM_NeedSync then
-  InitializeCriticalSection(PEM_Synchronizer);
-end;
-
-//------------------------------------------------------------------------------
-
-procedure PEM_Finalize;
-begin
-If PEM_NeedSync then
-  DeleteCriticalSection(PEM_Synchronizer);
-end;
-
-{$ENDIF}
-
-{===============================================================================
-    Low-level functions - implementation
-===============================================================================}
-
-Function CheckLibrary(LibHandle: TDLULibraryHandle): Boolean;
-begin
-{$IFDEF Windows}
-Result := LibHandle <> 0;
-{$ELSE}
-Result := Assigned(LibHandle);
-{$ENDIF}
-end;
-
-//------------------------------------------------------------------------------
-
-Function OpenLibrary(const LibFileName: String): TDLULibraryHandle;
-{$IF Defined(Windows) and Defined(DLU_SilenceCriticalErrors)}
-var
-  OldErrorMode: DWORD;
-{$IFEND}
-begin
-{$IFDEF Windows}
-{$IFDEF DLU_SilenceCriticalErrors}
-PEM_Lock;
-try
-  OldErrorMode := GetThreadErrorMode;
-  SetThreadErrorMode(OldErrorMode or SEM_FAILCRITICALERRORS,nil);
-  try
-{$ENDIF}
-    Result := LoadLibraryEx(PSysChar(StrToSys(LibFileName)),0,0);
-{$IFDEF DLU_SilenceCriticalErrors}
-  finally
-    SetThreadErrorMode(OldErrorMode,nil);
-  end;
-finally
-  PEM_Unlock;
-end;
-{$ENDIF}
-{$ELSE}
-Result := dlopen(PSysChar(StrToSys(LibFileName)),RTLD_NOW);
-{$ENDIF}
-end;
-
-//------------------------------------------------------------------------------
-
-procedure CloseLibrary(var LibHandle: TDLULibraryHandle);
-begin
-If CheckLibrary(LibHandle) then
-  begin
-  {$IFDEF Windows}
-    FreeLibrary(LibHandle);
-    LibHandle := 0;
-  {$ELSE}
-    dlclose(LibHandle); // it can fail, but let's ignore it here
-    LibHandle := nil;
-  {$ENDIF}
+    else raise EDLULibraryOpenError.Create('Kernel32.dll not loaded.');
   end;
 end;
 
-//------------------------------------------------------------------------------
-
-Function GetSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: String): Pointer;
-begin
-If CheckLibrary(LibHandle) then
-{$IFDEF Windows}
-  Result := GetProcAddress(LibHandle,PSysChar(StrToSys(SymbolName)))
-{$ELSE}
-  Result := dlsym(LibHandle,PSysChar(StrToSys(SymbolName)))
-{$ENDIF}
-else
-{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
-  raise EDLUInvalidParameter.CreateFmt('GetSymbolAddr: Invalid library handle 0x%p.',[Pointer(LibHandle)]);
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
-end;
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-Function GetSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: String; out Address: Pointer): Boolean;
-begin
-If CheckLibrary(LibHandle) then
-  begin
-  {$IFDEF Windows}
-    Address := GetProcAddress(LibHandle,PSysChar(StrToSys(SymbolName)));
-    Result := Assigned(Address);
-  {$ELSE}
-  {
-    dlsym can return a VALID nil value, to check for errors, we have to look
-    into what dlerror function returns after a call to dlsym, if it does not
-    return anything (null/nil), we can assume no error has occured
-  }
-    dlerror;  // clear last error
-    Address := dlsym(LibHandle,PSysChar(StrToSys(SymbolName)));
-    Result := not Assigned(dlerror);
-  {$ENDIF}
-  end
-{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
-else raise EDLUInvalidParameter.CreateFmt('GetSymbolAddr: Invalid library handle 0x%p.',[Pointer(LibHandle)]);
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
-end;
-
-//------------------------------------------------------------------------------
-
-Function GetAndCheckSymbolAddr(LibHandle: TDLULibraryHandle; const SymbolName: String): Pointer;
-{$IFNDEF Windows}
-var
-  ErrorMsg: PSysChar;
-{$ENDIF}
-begin
-If CheckLibrary(LibHandle) then
-  begin
-  {$IFDEF Windows}
-    Result := GetProcAddress(LibHandle,PSysChar(StrToSys(SymbolName)));
-    If not Assigned(Result) then
-      raise EDLUSymbolError.CreateFmt('GetAndCheckSymbolAddr: Unable to resolve symbol "%s" (0x%.8x).',[SymbolName,GetLastError]);
-  {$ELSE}
-    dlerror;  // clear last error
-    Result := dlsym(LibHandle,PSysChar(StrToSys(SymbolName)));
-    ErrorMsg := dlerror;
-    If Assigned(ErrorMsg) then
-      raise EDLUSymbolError.CreateFmt('GetAndCheckSymbolAddr: Unable to resolve symbol "%s" (%s).',[SymbolName,SysToStr(ErrorMsg)]);
-  {$ENDIF}
-  end
-{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
-else raise EDLUInvalidParameter.CreateFmt('GetAndCheckSymbolAddr: Invalid library handle 0x%p.',[Pointer(LibHandle)]);
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
-end;
-
-{===============================================================================
-    High-level functions - implementation
-===============================================================================}
 {-------------------------------------------------------------------------------
-    High-level functions - internals
+    Process error mode management - public functions
 -------------------------------------------------------------------------------}
 
-var
-  HLF_Synchronizer: TRTLCriticalSection;
-
-//------------------------------------------------------------------------------
-
-procedure HLF_Initialize;
+Function GetThreadErrorMode: DWORD;
 begin
-{$IF Defined(FPC) and not Defined(Windows)}
-InitCriticalSection(HLF_Synchronizer);
-{$ELSE}
-InitializeCriticalSection(HLF_Synchronizer);
-{$IFEND}
+Result := VAR_GetThreadErrorMode;
 end;
 
 //------------------------------------------------------------------------------
 
-procedure HLF_Finalize;
+Function SetThreadErrorMode(dwNewMode: DWORD; lpOldMode: LPDWORD): BOOL;
 begin
-{$IF Defined(FPC) and not Defined(Windows)}
-DoneCriticalSection(HLF_Synchronizer);
-{$ELSE}
-DeleteCriticalSection(HLF_Synchronizer);
-{$IFEND}
+Result := VAR_SetThreadErrorMode(dwNewMode,lpOldMode);
 end;
 
-//------------------------------------------------------------------------------
+{$ENDIF}
 
-procedure HLF_Lock;
-begin
-EnterCriticalSection(HLF_Synchronizer);
-end;
-
-//------------------------------------------------------------------------------
-
-procedure HLF_Unlock;
-begin
-LeaveCriticalSection(HLF_Synchronizer);
-end;
-
+{===============================================================================
+    Functions - implementation
+===============================================================================}
 {-------------------------------------------------------------------------------
-    High-level functions - public part
+    Functions - utility functions
 -------------------------------------------------------------------------------}
 
 Function Symbol(const Name: String; AddressVar: PPointer): TDLUSymbol;
@@ -749,247 +450,267 @@ Result.Name := Name;
 Result.AddressVar := AddressVar;
 end;
 
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Functions - core functions
+-------------------------------------------------------------------------------}
 
-Function CheckLibrary(Context: TDLULibraryContext): Boolean;
+Function CheckLibrary(LibraryHandle: TDLULibraryHandle): Boolean;
 begin
-HLF_Lock;
-try
-  Result := (Context.ReferenceCount > 0) and CheckLibrary(Context.LibraryHandle);
-finally
-  HLF_Unlock;
-end;
-end;
-
-//------------------------------------------------------------------------------
-
-Function OpenLibrary(const LibFileName: String; var Context: TDLULibraryContext): Integer;
-begin
-Result := 0;
-HLF_Lock;
-try
-  Inc(Context.ReferenceCount);
-  If Context.ReferenceCount <= 1 then
-    begin
-      // first call on this context
-      Context.ReferenceCount := 1;
-      Context.FileName := LibFileName;
-      Context.LibraryHandle := OpenLibrary(LibFileName);
-      If not CheckLibrary(Context.LibraryHandle) then
-        raise EDLULibraryOpenError.CreateFmt('OpenLibrary: Failed to open library "%s".',[LibFileName]);
-    end;
-  Result := Context.ReferenceCount;
-finally
-  HLF_Unlock;
-end;
+{$IFDEF Windows}
+Result := LibraryHandle <> 0;
+{$ELSE}
+Result := Assigned(LibraryHandle);
+{$ENDIF}
 end;
 
 //------------------------------------------------------------------------------
 
-Function CloseLibrary(var Context: TDLULibraryContext): Boolean;
+{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}
+Function OpenLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle;
+{$IFDEF Windows}
+var
+  OldErrorMode: DWORD;
 begin
-HLF_Lock;
+OldErrorMode := 0;
+If SilentCriticalErrors then
+  begin
+    OldErrorMode := GetThreadErrorMode;
+    SetThreadErrorMode(OldErrorMode or SEM_FAILCRITICALERRORS,nil);
+  end;
 try
-  Dec(Context.ReferenceCount);
-  If Context.ReferenceCount <= 0 then
-    begin
-      Context.ReferenceCount := 0;
-      Context.FileName := '';
-      CloseLibrary(Context.LibraryHandle);
-      Result := True;
-    end
-  else Result := False;
+  Result := LoadLibraryEx(PSysChar(StrToSys(LibFileName)),0,0);
 finally
-  HLF_Unlock;
+  If SilentCriticalErrors then
+    SetThreadErrorMode(OldErrorMode,nil);
 end;
+end;
+{$ELSE}
+begin
+Result := dlopen(PSysChar(StrToSys(LibFileName)),RTLD_NOW);
+end;
+{$ENDIF}
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
+
+//------------------------------------------------------------------------------
+
+Function OpenAndCheckLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle;
+begin
+Result := OpenLibrary(LibFileName,SilentCriticalErrors);
+If not CheckLibrary(Result) then
+  raise EDLULibraryOpenError.CreateFmt('OpenLibrary: Failed to open library "%s".',[LibFileName]);
 end;
 
 //------------------------------------------------------------------------------
 
-Function GetSymbolAddr(Context: TDLULibraryContext; const SymbolName: String): Pointer;
+procedure CloseLibrary(var LibraryHandle: TDLULibraryHandle);
 begin
-HLF_Lock;
-try
-  Result := GetSymbolAddr(Context.LibraryHandle,SymbolName);
-finally
-  HLF_Unlock;
+If CheckLibrary(LibraryHandle) then
+  begin
+  {$IFDEF Windows}
+    FreeLibrary(LibraryHandle);
+    LibraryHandle := 0;
+  {$ELSE}
+    dlclose(LibraryHandle); // it can fail, but let's ignore it here
+    LibraryHandle := nil;
+  {$ENDIF}
+  end;
 end;
+
+//------------------------------------------------------------------------------
+
+Function GetSymbolAddr(LibraryHandle: TDLULibraryHandle; const SymbolName: String): Pointer;
+begin
+If CheckLibrary(LibraryHandle) then
+{$IFDEF Windows}
+  Result := GetProcAddress(LibraryHandle,PSysChar(StrToSys(SymbolName)))
+{$ELSE}
+  Result := dlsym(LibraryHandle,PSysChar(StrToSys(SymbolName)))
+{$ENDIF}
+else
+{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
+  raise EDLUInvalidParameter.CreateFmt('GetSymbolAddr: Invalid library handle (0x%p).',[Pointer(LibraryHandle)]);
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-Function GetSymbolAddr(Context: TDLULibraryContext; const SymbolName: String; out Address: Pointer): Boolean;
+Function GetSymbolAddr(LibraryHandle: TDLULibraryHandle; const SymbolName: String; out Address: Pointer): Boolean;
 begin
-HLF_Lock;
-try
-  Result := GetSymbolAddr(Context.LibraryHandle,SymbolName,Address);
-finally
-  HLF_Unlock;
-end;
+If CheckLibrary(LibraryHandle) then
+  begin
+  {$IFDEF Windows}
+    Address := GetProcAddress(LibraryHandle,PSysChar(StrToSys(SymbolName)));
+    Result := Assigned(Address);
+  {$ELSE}
+  {
+    dlsym can return a VALID nil value, to check for errors, we have to look
+    into what dlerror function returns after a call to dlsym, if it does not
+    return anything (null/nil), we can assume no error has occured
+  }
+    dlerror;  // clear last error
+    Address := dlsym(LibraryHandle,PSysChar(StrToSys(SymbolName)));
+    Result := not Assigned(dlerror);
+  {$ENDIF}
+  end
+{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
+else raise EDLUInvalidParameter.CreateFmt('GetSymbolAddr: Invalid library handle (0x%p).',[Pointer(LibraryHandle)]);
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
 end;
 
 //------------------------------------------------------------------------------
 
-Function GetAndCheckSymbolAddr(Context: TDLULibraryContext; const SymbolName: String): Pointer;
+Function GetAndCheckSymbolAddr(LibraryHandle: TDLULibraryHandle; const SymbolName: String): Pointer;
+{$IFNDEF Windows}
+var
+  ErrorMsg: PSysChar;
+{$ENDIF}
 begin
-HLF_Lock;
-try
-  Result := GetAndCheckSymbolAddr(Context.LibraryHandle,SymbolName);
-finally
-  HLF_Unlock;
-end;
-end;
-
-//------------------------------------------------------------------------------
-
-Function ResolveSymbol(Context: TDLULibraryContext; Symbol: TDLUSymbol; FailOnUnresolved: Boolean = False): Boolean;
-begin
-HLF_Lock;
-try
-  If FailOnUnresolved then
-    begin
-      Symbol.AddressVar^ := GetAndCheckSymbolAddr(Context.LibraryHandle,Symbol.Name);
-      Result := True; // if something would be wrong, the GetAndCheckSymbolAddr would raise an exception
-    end
-  else Result := GetSymbolAddr(Context.LibraryHandle,Symbol.Name,Symbol.AddressVar^);
-finally
-  HLF_Unlock;
-end;
+If CheckLibrary(LibraryHandle) then
+  begin
+  {$IFDEF Windows}
+    Result := GetProcAddress(LibraryHandle,PSysChar(StrToSys(SymbolName)));
+    If not Assigned(Result) then
+      raise EDLUSymbolError.CreateFmt('GetAndCheckSymbolAddr: Unable to resolve symbol "%s" (0x%.8x).',[SymbolName,GetLastError]);
+  {$ELSE}
+    dlerror;  // clear last error
+    Result := dlsym(LibraryHandle,PSysChar(StrToSys(SymbolName)));
+    ErrorMsg := dlerror;
+    If Assigned(ErrorMsg) then
+      raise EDLUSymbolError.CreateFmt('GetAndCheckSymbolAddr: Unable to resolve symbol "%s" (%s).',[SymbolName,SysToStr(ErrorMsg)]);
+  {$ENDIF}
+  end
+{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
+else raise EDLUInvalidParameter.CreateFmt('GetAndCheckSymbolAddr: Invalid library handle (0x%p).',[Pointer(LibraryHandle)]);
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
 end;
 
-//------------------------------------------------------------------------------
+{-------------------------------------------------------------------------------
+    Functions - macro functions
+-------------------------------------------------------------------------------}
 
-Function ResolveSymbolNames(Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
+Function ResolveSymbolNames(LibraryHandle: TDLULibraryHandle; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
 var
   i:  Integer;
 begin
 Result := 0;
-HLF_Lock;
-try
-  If Length(Names) = Length(Addresses) then
-    begin
-      If FailOnUnresolved then
-        begin
-          For i := Low(Names) to High(Names) do
-            Addresses[i]^ := GetAndCheckSymbolAddr(Context.LibraryHandle,Names[i]);
-          Result := Length(Names);
-        end
-      else
-        begin
-          For i := Low(Names) to High(Names) do
-            If GetSymbolAddr(Context.LibraryHandle,Names[i],Addresses[i]^) then
-              Inc(Result);
-        end;
-    end
-  else raise EDLUInvalidParameter.CreateFmt('ResolveSymbols: Length of arrays do not match (%d,%d).',[Length(Names),Length(Addresses)]);
-finally
-  HLF_Unlock;
-end;
+If Length(Names) = Length(Addresses) then
+  begin
+    If FailOnUnresolved then
+      begin
+        For i := Low(Names) to High(Names) do
+          Addresses[i]^ := GetAndCheckSymbolAddr(LibraryHandle,Names[i]);
+        Result := Length(Names);
+      end
+    else
+      begin
+        For i := Low(Names) to High(Names) do
+          If GetSymbolAddr(LibraryHandle,Names[i],Addresses[i]^) then
+            Inc(Result);
+      end;
+  end
+else raise EDLUInvalidParameter.CreateFmt('ResolveSymbolNames: Length of arrays do not match (%d,%d).',[Length(Names),Length(Addresses)]);
 end;
 
 //------------------------------------------------------------------------------
 
-Function ResolveSymbols(Context: TDLULibraryContext; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer;
+Function ResolveSymbol(LibraryHandle: TDLULibraryHandle; Symbol: TDLUSymbol; FailOnUnresolved: Boolean = False): Boolean;
+begin
+If FailOnUnresolved then
+  begin
+    Symbol.AddressVar^ := GetAndCheckSymbolAddr(LibraryHandle,Symbol.Name);
+    Result := True; // if something would be wrong, the GetAndCheckSymbolAddr would raise an exception
+  end
+else Result := GetSymbolAddr(LibraryHandle,Symbol.Name,Symbol.AddressVar^);
+end;
+
+//------------------------------------------------------------------------------
+
+Function ResolveSymbols(LibraryHandle: TDLULibraryHandle; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer;
 var
   i:        Integer;
   TempPtr:  Pointer;
 begin
 Result := 0;
-HLF_Lock;
-try
-  If FailOnUnresolved then
-    begin
-      For i := 0 to Pred(Symbols.Count) do
-        Symbols.Objects[i] := TObject(GetAndCheckSymbolAddr(Context.LibraryHandle,Symbols[i]));
-      Result := Symbols.Count;
-    end
-  else
-    begin
-      For i := 0 to Pred(Symbols.Count) do
-        If GetSymbolAddr(Context.LibraryHandle,Symbols[i],TempPtr) then
-          begin
-            Symbols.Objects[i] := TObject(TempPtr);
-            Inc(Result);
-          end
-        else Symbols.Objects[i] := nil;
-    end;
-finally
-  HLF_Unlock;
-end;
+If FailOnUnresolved then
+  begin
+    For i := 0 to Pred(Symbols.Count) do
+      Symbols.Objects[i] := TObject(GetAndCheckSymbolAddr(LibraryHandle,Symbols[i]));
+    Result := Symbols.Count;
+  end
+else
+  begin
+    For i := 0 to Pred(Symbols.Count) do
+      If GetSymbolAddr(LibraryHandle,Symbols[i],TempPtr) then
+        begin
+          Symbols.Objects[i] := TObject(TempPtr);
+          Inc(Result);
+        end
+      else Symbols.Objects[i] := nil;
+  end;
 end;
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+//------------------------------------------------------------------------------
 
-Function ResolveSymbols(Context: TDLULibraryContext; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer;
+Function ResolveSymbols(LibraryHandle: TDLULibraryHandle; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
 var
   i:  Integer;
 begin
 Result := 0;
-HLF_Lock;
+For i := Low(Symbols) to High(Symbols) do
+  If ResolveSymbol(LibraryHandle,Symbols[i],FailOnUnresolved) then
+    Inc(Result);
+end;
+
+//------------------------------------------------------------------------------
+
+Function OpenLibraryAndResolveSymbolNames(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer;
+begin
+LibraryHandle := OpenAndCheckLibrary(LibFileName,SilentCriticalErrors);
 try
-  For i := Low(Symbols) to High(Symbols) do
-    If ResolveSymbol(Context,Symbols[i],FailOnUnresolved) then
-      Inc(Result);
-finally
-  HLF_Unlock;
+  Result := ResolveSymbolNames(LibraryHandle,Names,Addresses,FailOnUnresolved);
+except
+  CloseLibrary(LibraryHandle);
+  raise;  // re-raise exception
 end;
 end;
 
 //------------------------------------------------------------------------------
 
-Function OpenLibraryAndResolveSymbolNames(const LibFileName: String; var Context: TDLULibraryContext; const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False): Integer;
+Function OpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  Symbols: TStringList; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer;
 begin
-Result := 0;
-HLF_Lock;
+LibraryHandle := OpenAndCheckLibrary(LibFileName,SilentCriticalErrors);
 try
-  OpenLibrary(LibFileName,Context);
-  try
-    Result := ResolveSymbolNames(Context,Names,Addresses,FailOnUnresolved);
-  except
-    CloseLibrary(Context);
-    raise;  // re-raise exception
-  end;
-finally
-  HLF_Unlock;
+  Result := ResolveSymbols(LibraryHandle,Symbols,FailOnUnresolved);
+except
+  CloseLibrary(LibraryHandle);
+  raise;
 end;
 end;
 
 //------------------------------------------------------------------------------
 
-Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext; Symbols: TStringList; FailOnUnresolved: Boolean = False): Integer;
+Function OpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer;
 begin
-Result := 0;
-HLF_Lock;
+LibraryHandle := OpenAndCheckLibrary(LibFileName,SilentCriticalErrors);
 try
-  OpenLibrary(LibFileName,Context);
-  try
-    Result := ResolveSymbols(Context,Symbols,FailOnUnresolved);
-  except
-    CloseLibrary(Context);
-    raise;
-  end;
-finally
-  HLF_Unlock;
+  Result := ResolveSymbols(LibraryHandle,Symbols,FailOnUnresolved);
+except
+  CloseLibrary(LibraryHandle);
+  raise;
 end;
 end;
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+{-------------------------------------------------------------------------------
+    Functions - backward compatibility
+-------------------------------------------------------------------------------}
 
-Function OpenLibraryAndResolveSymbols(const LibFileName: String; var Context: TDLULibraryContext; Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False): Integer; overload;
+Function OpenLibrary(const LibFileName: String; out Context: TDLULibraryContext; SilentCriticalErrors: Boolean = False): Integer;
 begin
-Result := 0;
-HLF_Lock;
-try
-  OpenLibrary(LibFileName,Context);
-  try
-    Result := ResolveSymbols(Context,Symbols,FailOnUnresolved);
-  except
-    CloseLibrary(Context);
-    raise;
-  end;
-finally
-  HLF_Unlock;
-end;
+Context := TDLULibraryContext(OpenAndCheckLibrary(LibFileName,SilentCriticalErrors));
+Result := 1;
 end;
 
 {===============================================================================
@@ -999,11 +720,6 @@ end;
 {$IFDEF Windows}
 initialization
   PEM_Initialize;
-  HLF_Initialize
-
-finalization
-  HLF_Finalize;
-  PEM_Finalize;
 {$ENDIF}
 
 end.
