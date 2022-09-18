@@ -14,11 +14,11 @@
     on different systems.
     Beyond that, only some simple macro functions are currently implemented.
 
-  Version 1.1 (2021-11-08)
+  Version 1.2 (2022-09-18)
 
-  Last change 2021-11-08
+  Last change 2022-09-18
 
-  ©2020-2021 František Milt
+  ©2020-2022 František Milt
 
   Contacts:
     František Milt: frantisek.milt@gmail.com
@@ -35,15 +35,38 @@
       github.com/TheLazyTomcat/Lib.DynLibUtils
 
   Dependencies:
-    StrRect        - github.com/TheLazyTomcat/Lib.StrRect
   * AuxTypes       - github.com/TheLazyTomcat/Lib.AuxTypes
+  * SimpleCPUID    - github.com/TheLazyTomcat/Lib.SimpleCPUID
+    StrRect        - github.com/TheLazyTomcat/Lib.StrRect
   * WindowsVersion - github.com/TheLazyTomcat/Lib.WindowsVersion
 
-  Libraries AuxTypes and WindowsVersion are only required when compiling for
-  Windows OS.
+  Library AuxTypes is required only when compiling for x86(-64) CPU or Windows
+  operating system.
+
+  Library SimpleCPUID is required only when compiling for x86(-64) CPU.
+
+  Library WindowsVersion is required only when compiling for Windows OS.
 
 ===============================================================================}
 unit DynLibUtils;
+{
+  DynLibUtils_PurePascal
+
+  If you want to compile this unit without ASM, don't want to or cannot define
+  PurePascal for the entire project and at the same time you don't want to or
+  cannot make changes to this unit, define this symbol for the entire project
+  and this unit will be compiled in PurePascal mode.
+
+  Note that, in fact, this unit cannot be compiled without asm when compiling
+  for x86(-64) processor.
+}
+{$IFDEF DynLibUtils_PurePascal}
+  {$DEFINE PurePascal}
+{$ENDIF}
+
+{$IF Defined(CPU386) or Defined(CPUX86_64) or Defined(CPUX64)}
+  {$DEFINE CPU_x86x}
+{$IFEND}
 
 {$IF Defined(WINDOWS) or Defined(MSWINDOWS)}
   {$DEFINE Windows}
@@ -56,6 +79,9 @@ unit DynLibUtils;
 {$IFDEF FPC}
   {$MODE ObjFPC}
   {$MODESWITCH CLASSICPROCVARS+}
+  {$IFDEF CPU_x86x}
+    {$ASMMODE Intel}
+  {$ENDIF}
   {$INLINE ON}
   {$DEFINE CanInline}
   {$DEFINE FPC_DisableWarns}
@@ -68,6 +94,10 @@ unit DynLibUtils;
   {$IFEND}
 {$ENDIF}
 {$H+}
+
+{$IF Defined(CPU_x86x) and Defined(PurePascal)}
+  {$MESSAGE WARN 'This unit cannot be compiled without ASM.'}
+{$IFEND}
 
 interface
 
@@ -158,6 +188,25 @@ Function OpenLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = 
   EDLULibraryOpenError exception.
 }
 Function OpenAndCheckLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle;
+
+{
+  SafeOpenLibrary
+
+  Works the same as OpenLibrary, but it preserves some of the system settings
+  across the call, namely process/thread error mode on Windows OS and X87
+  control word and MXCSR register on x86(-64) processors.
+  It is here for situations where the loaded library is changing those settings
+  but this behavior is undesirable.
+}
+Function SafeOpenLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle; overload;
+
+{
+  SafeOpenAndCheckLibrary
+
+  Works the same as OpenAndCheckLibrary, but preserves selected system settings
+  (see SafeOpenLibrary for details).
+}
+Function SafeOpenAndCheckLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle;
 
 {
   CloseLibrary
@@ -324,6 +373,21 @@ Function OpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHand
 Function OpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
   Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer; overload;
 
+{
+  SafeOpenLibraryAndResolveSymbol(s/Names)
+
+  These functions are working the same as OpenLibraryAndResolveSymbol(s/Names),
+  but they preserve selected system settings (see SafeOpenLibrary for details).
+}
+Function SafeOpenLibraryAndResolveSymbolNames(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer;
+
+Function SafeOpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  Symbols: TStringList; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer; overload;
+  
+Function SafeOpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer; overload;
+
 {-------------------------------------------------------------------------------
     Functions - backward compatibility
 -------------------------------------------------------------------------------}
@@ -349,11 +413,20 @@ const
 }
 Function OpenLibrary(const LibFileName: String; out Context: TDLULibraryContext; SilentCriticalErrors: Boolean = False): Integer; overload;
 
+{
+  SafeOpenLibrary
+
+  Works the same as OpenLibrary, but preserves selected system settings (see
+  precious overload of SafeOpenLibrary for details).
+}
+Function SafeOpenLibrary(const LibFileName: String; out Context: TDLULibraryContext; SilentCriticalErrors: Boolean = False): Integer; overload;
+
 implementation
 
 uses
   {$IFNDEF Windows}dl,{$ENDIF}
-  StrRect{$IFDEF Windows}, WindowsVersion{$ENDIF};
+  StrRect {$IFDEF CPU_x86x}, SimpleCPUID{$ENDIF}
+  {$IFDEF Windows}, WindowsVersion{$ENDIF};
 
 {$IFDEF FPC_DisableWarns}
   {$DEFINE FPCDWM}
@@ -449,6 +522,105 @@ end;
 {$ENDIF}
 
 {===============================================================================
+    Safe loading - implementation
+===============================================================================}
+
+{$IFDEF CPU_x86x}
+
+Function GetX87CW: Word; register; assembler;
+var
+  Temp: Word;
+asm
+    FSTCW   word ptr [Temp]
+    MOV     AX, word ptr [Temp]
+end;
+
+//------------------------------------------------------------------------------
+
+procedure SetX87CW(NewValue: Word); register; assembler;
+var
+  Temp: Word;
+asm
+    MOV     word ptr [Temp], NewValue
+    FLDCW   word ptr [Temp]
+end;
+
+//------------------------------------------------------------------------------
+
+Function GetMXCSR: LongWord; register; assembler;
+var
+  Temp: LongWord;
+asm
+    STMXCSR   dword ptr [Temp]
+    MOV       EAX,  dword ptr [Temp]
+end;
+
+//------------------------------------------------------------------------------
+
+procedure SetMXCSR(NewValue: LongWord); register; assembler;
+var
+  Temp: LongWord;
+asm
+    MOV       dword ptr [Temp], NewValue
+    LDMXCSR   dword ptr [Temp]
+end;
+
+{$ENDIF}
+
+//------------------------------------------------------------------------------  
+type
+  TDLUSafeLoadState = record
+  {$IFDEF Windows}
+    ErrorMode:  DWORD;
+  {$ENDIF}
+  {$IFDEF CPU_x86x}
+    X87CW:      Word;
+    MXCSR:      LongWord;
+  {$ENDIF}
+  end;
+
+//------------------------------------------------------------------------------
+
+procedure SafeLoadSaveState(out State: TDLUSafeLoadState);
+begin
+{$IFDEF Windows}
+State.ErrorMode := GetThreadErrorMode;
+{$ENDIF}
+{$IFDEF CPU_x86x}
+with TSimpleCPUID.Create do
+try
+  If Info.SupportedExtensions.X87 then
+    State.X87CW := GetX87CW;
+  If Info.SupportedExtensions.SSE then
+    State.MXCSR := GetMXCSR;
+finally
+  Free;
+end;
+{$ENDIF}
+end;
+
+//------------------------------------------------------------------------------
+
+procedure SafeLoadRestoreState(const State: TDLUSafeLoadState);
+begin
+{$IFDEF Windows}
+SetThreadErrorMode(State.ErrorMode,nil);
+{$ENDIF}
+{$IFDEF CPU_x86x}
+with TSimpleCPUID.Create do
+try
+  If Info.SupportedExtensions.X87 then
+    SetX87CW(State.X87CW);
+  If Info.SupportedExtensions.SSE then
+    SetMXCSR(State.MXCSR);
+finally
+  Free;
+end;
+{$ENDIF}
+end;
+
+
+{===============================================================================
     Functions - implementation
 ===============================================================================}
 {-------------------------------------------------------------------------------
@@ -517,6 +689,34 @@ begin
 Result := OpenLibrary(LibFileName,SilentCriticalErrors);
 If not CheckLibrary(Result) then
   raise EDLULibraryOpenError.CreateFmt('OpenLibrary: Failed to open library "%s".',[LibFileName]);
+end;
+
+//------------------------------------------------------------------------------
+
+Function SafeOpenLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle;
+var
+  State:  TDLUSafeLoadState;
+begin
+SafeLoadSaveState(State);
+try
+  Result := OpenLibrary(LibFileName,SilentCriticalErrors);
+finally
+  SafeLoadRestoreState(State);
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function SafeOpenAndCheckLibrary(const LibFileName: String; SilentCriticalErrors: Boolean = False): TDLULibraryHandle;
+var
+  State:  TDLUSafeLoadState;
+begin
+SafeLoadSaveState(State);
+try
+  Result := OpenAndCheckLibrary(LibFileName,SilentCriticalErrors);
+finally
+  SafeLoadRestoreState(State);
+end;
 end;
 
 //------------------------------------------------------------------------------
@@ -609,7 +809,7 @@ Function LibraryIsPresent(const LibFileName: String): Boolean;
 var
   LibraryHandle:  TDLULibraryHandle;
 begin
-LibraryHandle := OpenLibrary(LibFileName,True);
+LibraryHandle := SafeOpenLibrary(LibFileName,True);
 try
   Result := CheckLibrary(LibraryHandle);
 finally
@@ -624,7 +824,7 @@ var
   LibraryHandle:  TDLULibraryHandle;
   SymbolAddress:  Pointer;
 begin
-LibraryHandle := OpenAndCheckLibrary(LibFileName,True);
+LibraryHandle := SafeOpenAndCheckLibrary(LibFileName,True);
 try
   Result := GetSymbolAddr(LibraryHandle,SymbolName,SymbolAddress);
 finally
@@ -751,6 +951,51 @@ except
 end;
 end;
 
+//------------------------------------------------------------------------------
+
+Function SafeOpenLibraryAndResolveSymbolNames(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  const Names: array of String; Addresses: array of PPointer; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer;
+var
+  State:  TDLUSafeLoadState;
+begin
+SafeLoadSaveState(State);
+try
+  Result := OpenLibraryAndResolveSymbolNames(LibFileName,LibraryHandle,Names,Addresses,FailOnUnresolved,SilentCriticalErrors);
+finally
+  SafeLoadRestoreState(State);
+end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function SafeOpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  Symbols: TStringList; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer;
+var
+  State:  TDLUSafeLoadState;
+begin
+SafeLoadSaveState(State);
+try
+  Result := OpenLibraryAndResolveSymbols(LibFileName,LibraryHandle,Symbols,FailOnUnresolved,SilentCriticalErrors);
+finally
+  SafeLoadRestoreState(State);
+end;
+end;
+
+//------------------------------------------------------------------------------
+  
+Function SafeOpenLibraryAndResolveSymbols(const LibFileName: String; out LibraryHandle: TDLULibraryHandle;
+  Symbols: array of TDLUSymbol; FailOnUnresolved: Boolean = False; SilentCriticalErrors: Boolean = False): Integer;
+var
+  State:  TDLUSafeLoadState;
+begin
+SafeLoadSaveState(State);
+try
+  Result := OpenLibraryAndResolveSymbols(LibFileName,LibraryHandle,Symbols,FailOnUnresolved,SilentCriticalErrors);
+finally
+  SafeLoadRestoreState(State);
+end;
+end;
+
 {-------------------------------------------------------------------------------
     Functions - backward compatibility
 -------------------------------------------------------------------------------}
@@ -759,6 +1004,20 @@ Function OpenLibrary(const LibFileName: String; out Context: TDLULibraryContext;
 begin
 Context := TDLULibraryContext(OpenAndCheckLibrary(LibFileName,SilentCriticalErrors));
 Result := 1;
+end;
+
+//------------------------------------------------------------------------------
+
+Function SafeOpenLibrary(const LibFileName: String; out Context: TDLULibraryContext; SilentCriticalErrors: Boolean = False): Integer;
+var
+  State:  TDLUSafeLoadState;
+begin
+SafeLoadSaveState(State);
+try
+  Result := OpenLibrary(LibFileName,Context,SilentCriticalErrors);
+finally
+  SafeLoadRestoreState(State);
+end;
 end;
 
 {===============================================================================
