@@ -16,7 +16,7 @@
 
   Version 1.2 (2022-09-18)
 
-  Last change 2022-09-18
+  Last change 2022-10-23
 
   ©2020-2022 František Milt
 
@@ -95,7 +95,7 @@ unit DynLibUtils;
 {$ENDIF}
 {$H+}
 
-{$IF Defined(CPU_x86x) and Defined(PurePascal)}
+{$IF Defined(CPU_x86x) and Defined(PurePascal) and not Defined(CompTest)}
   {$MESSAGE WARN 'This unit cannot be compiled without ASM.'}
 {$IFEND}
 
