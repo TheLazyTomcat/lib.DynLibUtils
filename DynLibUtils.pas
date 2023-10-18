@@ -16,7 +16,7 @@
     There are also contexts which offer more advanced options, but they are
     currently untested - use them with caution.
 
-  Version 1.3 (2023-10-18)
+  Version 1.3.1 (2023-10-18)
 
   Last change 2023-10-18
 
@@ -466,6 +466,23 @@ const
 {-------------------------------------------------------------------------------
     Context functions - utility functions
 -------------------------------------------------------------------------------}
+{
+  ContextLock
+
+  Locks the passed context so that only the current thread can access it.
+  
+  Nested locks are allowed, but remember to pair each lock operation with an
+  unlock operation.
+}
+procedure ContextLock(var Context: TDLULibraryContext); overload;
+
+{
+  ContextUnlock
+
+  Unlocks the passed context.
+}
+procedure ContextUnlock(var Context: TDLULibraryContext); overload;
+
 {
   GetContextData
 
@@ -1291,7 +1308,7 @@ Function dlinfo(handle: Pointer; request: cInt; info: Pointer): cInt; cdecl; ext
     Context functions - internals
 -------------------------------------------------------------------------------}
 
-procedure ContextLock(var Context: TDLULibraryContextInternal);
+procedure ContextLock(var Context: TDLULibraryContextInternal); overload;
 var
   IsDone: Boolean;
 begin
@@ -1317,7 +1334,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure ContextUnlock(var Context: TDLULibraryContextInternal);
+procedure ContextUnlock(var Context: TDLULibraryContextInternal); overload;
 var
   DestroyLock:  Boolean;
   IsDone:       Boolean;
@@ -1436,6 +1453,20 @@ end;
 {-------------------------------------------------------------------------------
     Context functions - utility functions
 -------------------------------------------------------------------------------}
+
+procedure ContextLock(var Context: TDLULibraryContext);
+begin
+ContextLock(PDLULibraryContextInternal(@Context)^);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure ContextUnlock(var Context: TDLULibraryContext);
+begin
+ContextUnlock(PDLULibraryContextInternal(@Context)^);
+end;
+
+//------------------------------------------------------------------------------
 
 Function ContextGetData(var Context: TDLULibraryContext): TDLULibraryContextData;
 var
