@@ -18,9 +18,9 @@
 
   Version 1.4 (2024-10-14)
 
-  Last change 2024-10-14
+  Last change 2025-02-27
 
-  ©2020-2024 František Milt
+  ©2020-2025 František Milt
 
   Contacts:
     František Milt: frantisek.milt@gmail.com
@@ -304,7 +304,7 @@ type
 
   optResolveNow
 
-    When activated, loading of a library also resolves all undefined symbol
+    When activated, loading of a library also resolves all undefined symbols
     before returning (RTLD_NOW is put into flags), as apposed to lazy binding
     when this option is not active (flags contain RTLD_LAZY).
 
@@ -366,11 +366,11 @@ type
 
     This option works similarly for CloseLibrary - this function decrements
     the internal reference count and only unloads the library if the count
-    reaches zero. With this option active it always cloases the library
+    reaches zero. With this option active it always closes the library
     (whether it is unloaded is decided by the OS).
 
     Each opening call with this option active must be paired by a closing
-    class with it.
+    call with it.
 
     Note that operating system keeps its own reference count for each loaded
     module/object, so this option might seem to be somewhat superfluous. But
